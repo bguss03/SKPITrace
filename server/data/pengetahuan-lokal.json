@@ -1,0 +1,136 @@
+[
+  {
+    "id": "SKPI-01",
+    "judul": "Pola baku nomor surat sertifikat",
+    "jenis": "diamati langsung",
+    "kata_kunci": [
+      "nomor",
+      "surat",
+      "regex",
+      "pola",
+      "format",
+      "romawi",
+      "ftik",
+      "bem",
+      "himatisi",
+      "himatika",
+      "ormawa",
+      "kode"
+    ],
+    "isi": "Format resmi nomor surat sertifikat kegiatan di lingkungan FTIK USM adalah No/Kode/Penerbit/Bulan-Romawi/Tahun, dengan penerbit resmi seperti FTIK-USM, BEM-USM, HIMATISI, HIMATIKA, atau UKM-USM. Nomor surat yang tidak sesuai pola baku ini ditandai perlu dicek ulang ke daftar hadir Ormawa penerbit.",
+    "sumber": "Pedoman Tata Naskah Akademik & Kemahasiswaan FTIK USM (CONTOH DUMMY)"
+  },
+  {
+    "id": "SKPI-02",
+    "judul": "Syarat minimum poin kredit yudisium",
+    "jenis": "aturan akademik",
+    "kata_kunci": [
+      "poin",
+      "kredit",
+      "syarat",
+      "minimum",
+      "minimal",
+      "yudisium",
+      "lulus",
+      "kelulusan",
+      "100",
+      "seratus",
+      "kategori",
+      "bobot",
+      "lomba",
+      "kepanitiaan",
+      "seminar",
+      "organisasi"
+    ],
+    "isi": "Mahasiswa wajib mengumpulkan minimal 100 poin kredit SKPI agar dinyatakan layak mendaftar yudisium. Poin dihitung dari kategori kegiatan (Lomba 30, Organisasi 25, Kepanitiaan 20, Pelatihan/Seminar 15) dikalikan bobot tingkat (Internasional 2.0, Nasional 1.5, Regional 1.2, Universitas 1.0) ditambah bonus peran (Juara 1/Ketua +20, Juara 2/Sekretaris +15, Juara 3/Koordinator +10, Anggota +5, Peserta +0).",
+    "sumber": "Buku Pedoman Poin Kredit SKPI Mahasiswa FTIK USM (CONTOH DUMMY)"
+  },
+  {
+    "id": "SKPI-03",
+    "judul": "Forensik metadata PDF dan skor integritas AI (ELA)",
+    "jenis": "butuh alat ukur",
+    "kata_kunci": [
+      "ela",
+      "metadata",
+      "skor",
+      "integritas",
+      "forensik",
+      "photoshop",
+      "splicing",
+      "edit",
+      "tempelan",
+      "piksel",
+      "80",
+      "delapan puluh",
+      "persen",
+      "anomali"
+    ],
+    "isi": "Pemeriksaan awal AI mengecek metadata PDF dan keseragaman kompresi piksel (Error Level Analysis). Ambang batas aman skor integritas AI adalah minimal 80 persen. Jika skor di bawah 80 persen karena terdeteksi jejak software edit ulang atau selisih tanggal modifikasi, dokumen ditandai perlu cek fisik sertifikat asli, bukan langsung divonis palsu.",
+    "sumber": "Standar Pemeriksaan Dokumen Digital Laboratorium Komputasi FTIK USM (CONTOH DUMMY)"
+  },
+  {
+    "id": "SKPI-04",
+    "judul": "Konsensus multi-signature validator resmi",
+    "jenis": "aturan komunitas",
+    "kata_kunci": [
+      "multisig",
+      "multi-signature",
+      "validator",
+      "kaprodi",
+      "admin",
+      "fakultas",
+      "wallet",
+      "tanda",
+      "tangan",
+      "sign",
+      "pengesah",
+      "resmi",
+      "dua"
+    ],
+    "isi": "Setiap dokumen SKPI wajib melewati konsensus akademik dua tahap (Multi-Signature 2/2) dari dua alamat wallet resmi yang berbeda. Sign 1 dilakukan oleh Ketua Program Studi (Kaprodi) untuk memvalidasi poin akademik, dan Sign 2 dilakukan oleh Admin Akademik Fakultas untuk mengunci bukti ke Solana Devnet.",
+    "sumber": "SOP Pengesahan Akademik & Yudisium FTIK USM (CONTOH DUMMY)"
+  },
+  {
+    "id": "SKPI-05",
+    "judul": "Pencatatan bukti hash SHA-256 di blockchain",
+    "jenis": "dokumen atau uji lab",
+    "kata_kunci": [
+      "hash",
+      "sha256",
+      "sha-256",
+      "blockchain",
+      "solana",
+      "devnet",
+      "pdf",
+      "qr",
+      "bukti",
+      "onchain",
+      "on-chain",
+      "tercatat",
+      "mismatch",
+      "identik"
+    ],
+    "isi": "Dokumen PDF SKPI resmi ber-QR Code dihitung nilai hash kriptografi SHA-256 (64 karakter heksadesimal) di browser lalu dicatat ke akun SkpiRecord di Solana Devnet tanpa mengunggah data pribadi mahasiswa (Zero-PII). Jika isi file PDF diubah walau hanya 1 karakter atau 1 byte, nilai hash akan berubah drastis (hash mismatch).",
+    "sumber": "Spesifikasi Arsitektur Smart Contract SKPITrace FTIK USM (CONTOH DUMMY)"
+  },
+  {
+    "id": "SKPI-06",
+    "judul": "Aturan keputusan dan penanganan sengketa",
+    "jenis": "aturan komunitas",
+    "kata_kunci": [
+      "palsu",
+      "asli",
+      "keputusan",
+      "vonis",
+      "sengketa",
+      "override",
+      "fisik",
+      "manual",
+      "panitia",
+      "aturan",
+      "hakim"
+    ],
+    "isi": "Satu indikasi anomali AI atau ketidaksesuaian hash belum boleh dijadikan vonis otomatis bahwa mahasiswa memalsukan dokumen. AI hanya bertugas memberi indikasi awal, sedangkan keputusan tertinggi tetap berada pada manusia (Kaprodi dan Panitia Yudisium) melalui mekanisme verifikasi berkas fisik sertifikat asli.",
+    "sumber": "Kesepakatan Komisi Etik & Panitia Yudisium FTIK USM (CONTOH DUMMY)"
+  }
+]

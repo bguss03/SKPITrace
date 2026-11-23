@@ -1,0 +1,54 @@
+{
+  "version": "0.1.0",
+  "name": "skpitrace",
+  "address": "SKP1TrAcE99xYzUvWxYz123456789ABCDEFGHJKLMNP",
+  "metadata": {
+    "name": "skpitrace",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Smart Contract Verifikasi SKPI & Multi-Signature Validator FTIK USM di Solana Devnet"
+  },
+  "instructions": [
+    {
+      "name": "approveKaprodi",
+      "accounts": [
+        { "name": "skpiRecord", "isMut": true, "isSigner": false },
+        { "name": "kaprodiSigner", "isMut": true, "isSigner": true },
+        { "name": "systemProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": [
+        { "name": "skpiId", "type": "string" },
+        { "name": "documentSha256Hash", "type": "string" },
+        { "name": "aiIntegrityScore", "type": "u8" },
+        { "name": "totalSkpiPoints", "type": "u16" }
+      ]
+    },
+    {
+      "name": "finalizeSkpiOnchain",
+      "accounts": [
+        { "name": "skpiRecord", "isMut": true, "isSigner": false },
+        { "name": "adminSigner", "isMut": true, "isSigner": true }
+      ],
+      "args": [
+        { "name": "expectedSha256Hash", "type": "string" }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "SkpiRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "skpiId", "type": "string" },
+          { "name": "documentSha256Hash", "type": "string" },
+          { "name": "aiIntegrityScore", "type": "u8" },
+          { "name": "totalSkpiPoints", "type": "u16" },
+          { "name": "approvalTimestamp", "type": "i64" },
+          { "name": "validatorWallets", "type": { "vec": "publicKey" } },
+          { "name": "isValidForYudisium", "type": "bool" }
+        ]
+      }
+    }
+  ]
+}

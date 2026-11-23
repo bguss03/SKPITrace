@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+__MACOSX
+
+# Kunci Rahasia Backend AI (Jangan pernah di-commit ke GitHub)
+server/.env
+.env
+.env.example
