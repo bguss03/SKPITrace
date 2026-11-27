@@ -7,8 +7,8 @@ import {
   PENCATAT_RESMI,
 } from './agent.mjs';
 
-const HOST = '127.0.0.1';
-const PORT = 3001;
+const HOST = process.env.HOST || '127.0.0.1';
+const PORT = Number(process.env.PORT) || 3001;
 const MAX_BODY_BYTES = 20 * 1024; // Batas 20 KB sesuai Langkah 8
 const PESAN_TIDAK_TERSEDIA =
   'Maaf, informasi tersebut belum tersedia dalam basis pengetahuan sistem.';

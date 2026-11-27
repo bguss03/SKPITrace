@@ -1,0 +1,123 @@
+name: SKPITrace CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze_and_test:
+    name: Security Audit, Typecheck & Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Audit repository secrets & .env hygiene
+        run: |
+          if git ls-files | grep -E '(^|/)(\.env)$'; then
+            echo "ERROR: File .env terdeteksi ikut ter-commit di repository!"
+            exit 1
+          fi
+          if git grep -I -E 'AIzaSy[0-9A-Za-z_-]{33}'; then
+            echo "ERROR: Terdeteksi pola Google/Gemini API Key di dalam file yang ter-track Git!"
+            exit 1
+          fi
+          echo "Secret & .env audit passed."
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript static analysis
+        run: npm run typecheck
+
+      - name: Check Backend ESM syntax
+        run: npm run check:server
+
+      - name: Run unit, contract IDL & security tests
+        run: npm test
+
+  build_and_release:
+    name: Build Web dApp & Release Bundle
+    needs: analyze_and_test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production frontend bundle
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          test -f dist/index.html
+          ls -lh dist dist/assets
+
+      - name: Upload PR Preview Build Artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: skpitrace-web-preview
+          path: dist/
+          retention-days: 7
+
+      - name: Package Full Release Bundle (Frontend + AI Backend + IDL)
+        if: github.event_name != 'pull_request'
+        run: |
+          tar -czf skpitrace-release-bundle.tar.gz \
+            dist \
+            server/index.mjs \
+            server/agent.mjs \
+            server/rag.mjs \
+            server/data \
+            src/idl/skpitrace.json \
+            package.json \
+            package-lock.json \
+            README.md
+          ls -lh skpitrace-release-bundle.tar.gz
+
+      - name: Upload Release Artifacts
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: skpitrace-release-bundle
+          path: |
+            dist/
+            skpitrace-release-bundle.tar.gz
+          retention-days: 30
+
+      - name: Create GitHub Release on version tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: skpitrace-release-bundle.tar.gz

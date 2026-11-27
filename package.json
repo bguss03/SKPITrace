@@ -7,7 +7,11 @@
     "dev": "fuser -k 3001/tcp 2>/dev/null || true; node --env-file=server/.env server/index.mjs & vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "server": "node --env-file=server/.env server/index.mjs"
+    "server": "node --env-file=server/.env server/index.mjs",
+    "typecheck": "tsc -b --pretty false",
+    "check:server": "node --check server/index.mjs && node --check server/agent.mjs && node --check server/rag.mjs",
+    "test": "node --test tests/ci.test.mjs",
+    "ci": "npm run typecheck && npm run check:server && npm test && npm run build"
   },
   "dependencies": {
     "@solana/wallet-adapter-base": "^0.9.23",
