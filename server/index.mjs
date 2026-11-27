@@ -4,15 +4,18 @@ import {
   jalankanAgent,
   panggilGeminiGenerateContent,
   daftarkanBuktiOnchainSimulasi,
+  PENCATAT_RESMI,
 } from './agent.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = 3001;
 const MAX_BODY_BYTES = 20 * 1024; // Batas 20 KB sesuai Langkah 8
+const PESAN_TIDAK_TERSEDIA =
+  'Maaf, informasi tersebut belum tersedia dalam basis pengetahuan sistem.';
 
 function getGeminiConfig() {
   const apiKey = (process.env.GEMINI_API_KEY || '').trim();
-  const model = (process.env.GEMINI_MODEL || 'gemini-3.6-flash').trim();
+  const model = (process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
   return { apiKey, model };
 }
 
@@ -113,6 +116,38 @@ function validasiPertanyaan(pertanyaan) {
   return trimmed;
 }
 
+/**
+ * Filter keamanan Modul 6: Mencegah XSS/script payload & pengiriman private key/seed phrase ke AI
+ */
+function deteksiInputBerbahaya(teks) {
+  const str = String(teks || '');
+  if (/<script\b[^>]*>|javascript:|onerror\s*=|onload\s*=|DROP\s+TABLE|UNION\s+SELECT/i.test(str)) {
+    return 'Input ditolak karena mengandung karakter atau skrip berbahaya.';
+  }
+  if (/\b(private\s*key|seed\s*phrase|secret\s*key|mnemonic)\b/i.test(str)) {
+    return 'Keamanan Sistem: Dilarang mengirimkan private key atau seed phrase ke dalam sistem maupun chat AI.';
+  }
+  return null;
+}
+
+/**
+ * Filter keamanan Modul 6: Deteksi Prompt Injection & permintaan bocoran data sensitif
+ */
+function deteksiPromptInjection(teks) {
+  const str = String(teks || '').toLowerCase();
+  const polaInjection = [
+    /ignore\s+(all\s+)?(previous|prior|above)\s+instructions/i,
+    /abaikan\s+(semua\s+)?(aturan|instruksi|perintah)/i,
+    /lupakan\s+(semua\s+)?(aturan|instruksi|perintah)/i,
+    /bocorkan\s+(data|api\s*key|rahasia|system\s*prompt|private\s*key)/i,
+    /tampilkan\s+(system\s*prompt|api\s*key|data\s+pengguna\s+lain)/i,
+    /reveal\s+(your\s+)?(system\s*prompt|api\s*key|secret)/i,
+    /act\s+as\s+|berperan\s+sebagai\s+hacker|jailbreak|bypass\s+aturan/i,
+    /jalankan\s+transaksi\s+otomatis|transfer\s+saldo|kirim\s+sol\b/i,
+  ];
+  return polaInjection.some((regex) => regex.test(str));
+}
+
 const server = http.createServer(async (req, res) => {
   const urlObj = new URL(req.url || '/', `http://${HOST}:${PORT}`);
   const pathname = urlObj.pathname;
@@ -143,28 +178,103 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Endpoint sinkronisasi bukti simulasi dari Validator Dashboard ke memori Backend Agent
+  // Dilengkapi pemeriksaan Authorization Role & Validasi Multi-Signature (Modul 6 Bagian 4 & 5)
   if (pathname === '/api/sync-bukti') {
-    const { hashHex, skpi_id, pencatat, validator_kedua, total_poin, skor_ai, timestamp, pda_address, tx_signature } =
-      body || {};
-    daftarkanBuktiOnchainSimulasi(hashHex, {
-      skpi_id: skpi_id || 'SKPI-FTIK-2026-CUSTOM',
-      pencatat: pencatat || '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU',
-      validator_kedua: validator_kedua || '9pQrStUvWxYz123456789ABCDEFGHJKLMNPQRSTUVWXY',
-      total_poin: Number(total_poin) || 100,
-      skor_ai: Number(skor_ai) || 90,
+    const headerWallet = String(req.headers['x-validator-wallet'] || '').trim();
+    const headerRole = String(req.headers['x-validator-role'] || '').trim().toUpperCase();
+
+    if (!headerWallet || !PENCATAT_RESMI.has(headerWallet)) {
+      return kirimJson(res, 403, {
+        error:
+          'Akses ditolak (403 Forbidden): Otorisasi gagal. Hanya wallet Validator Akademik resmi (Kaprodi / Admin Fakultas) yang diizinkan mencatat bukti on-chain.',
+      });
+    }
+
+    if (headerRole && headerRole !== 'KAPRODI' && headerRole !== 'ADMIN_AKADEMIK') {
+      return kirimJson(res, 403, {
+        error: 'Akses ditolak (403 Forbidden): Role pengguna tidak memiliki hak akses validator.',
+      });
+    }
+
+    const {
+      hashHex,
+      skpi_id,
+      pencatat,
+      validator_kedua,
+      total_poin,
+      skor_ai,
+      timestamp,
+      pda_address,
+      tx_signature,
+    } = body || {};
+
+    const cleanHash = String(hashHex || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(cleanHash)) {
+      return kirimJson(res, 400, {
+        error: 'Validasi ditolak: hashHex wajib berupa 64 karakter heksadesimal SHA-256.',
+      });
+    }
+
+    const walletSign1 = String(pencatat || '').trim();
+    const walletSign2 = String(validator_kedua || '').trim();
+    if (
+      !walletSign1 ||
+      !walletSign2 ||
+      walletSign1 === walletSign2 ||
+      (!PENCATAT_RESMI.has(walletSign1) && !PENCATAT_RESMI.has(walletSign2))
+    ) {
+      return kirimJson(res, 403, {
+        error:
+          'Otorisasi Multi-Signature ditolak: Bukti on-chain wajib memiliki 2 wallet validator yang berbeda (Kaprodi & Admin Fakultas).',
+      });
+    }
+
+    const numPoin = Number(total_poin) || 0;
+    const numSkor = Number(skor_ai) || 0;
+    if (numPoin < 100 || numSkor < 80) {
+      return kirimJson(res, 400, {
+        error: 'Validasi akademik ditolak: Total poin minimal 100 dan skor integritas minimal 80%.',
+      });
+    }
+
+    daftarkanBuktiOnchainSimulasi(cleanHash, {
+      skpi_id: String(skpi_id || 'SKPI-FTIK-2026-CUSTOM').trim(),
+      pencatat: walletSign1,
+      validator_kedua: walletSign2,
+      total_poin: numPoin,
+      skor_ai: numSkor,
       timestamp: Number(timestamp) || Math.floor(Date.now() / 1000),
-      pda_address: pda_address || 'SKP189ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnop',
-      tx_signature: tx_signature || '5SolDevnetSimulatedTx',
+      pda_address: String(pda_address || 'SKP189ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnop').trim(),
+      tx_signature: String(tx_signature || '5SolDevnetSimulatedTx').trim(),
     });
     return kirimJson(res, 200, { ok: true });
   }
 
-  // 1. Endpoint Langkah 8: POST /api/tanya (LLM Dasar Gemini)
+  // 1. Endpoint Langkah 8: POST /api/tanya (LLM Dasar Gemini dengan Guardrail Modul 6)
   if (pathname === '/api/tanya') {
     const pertanyaan = validasiPertanyaan(body?.pertanyaan);
     if (!pertanyaan) {
       return kirimJson(res, 400, {
         error: 'Pertanyaan wajib diisi, maksimal 500 karakter.',
+      });
+    }
+
+    const bahaya = deteksiInputBerbahaya(pertanyaan);
+    if (bahaya) {
+      return kirimJson(res, 400, { error: bahaya });
+    }
+
+    if (deteksiPromptInjection(pertanyaan)) {
+      return kirimJson(res, 200, {
+        jawaban:
+          'Permintaan ditolak oleh sistem keamanan AI: AI hanya boleh menjawab pertanyaan seputar sistem verifikasi SKPITrace, tidak boleh membocorkan data pengguna lain, dan tidak dapat menjalankan instruksi di luar batasan sistem.',
+      });
+    }
+
+    const daftarCatatan = cariCatatan(pertanyaan, 3);
+    if (daftarCatatan.length === 0) {
+      return kirimJson(res, 200, {
+        jawaban: PESAN_TIDAK_TERSEDIA,
       });
     }
 
@@ -176,13 +286,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
+      const konteks = susunKonteks(daftarCatatan);
       const data = await panggilGeminiGenerateContent({
         apiKey,
         model,
-        systemInstruction:
-          'Kamu asisten aplikasi verifikasi dokumen SKPI mahasiswa (SKPITrace). Jawab singkat dalam bahasa Indonesia, tanpa format markdown. Kalau tidak tahu, bilang tidak tahu.',
+        systemInstruction: `Kamu asisten aplikasi verifikasi dokumen SKPI mahasiswa (SKPITrace).
+Aturan:
+- AI hanya boleh menjawab pertanyaan seputar sistem ini berdasarkan catatan yang diberikan.
+- AI tidak boleh memberikan data pengguna lain.
+- AI tidak boleh menjalankan transaksi tanpa konfirmasi pengguna.
+- Jika informasi tidak tersedia, AI harus menjawab: "${PESAN_TIDAK_TERSEDIA}"
+- Jawab singkat dalam bahasa Indonesia tanpa format markdown.\n\nCATATAN:\n${konteks}`,
         contents: [{ role: 'user', parts: [{ text: pertanyaan }] }],
-        temperature: 0.3,
+        temperature: 0.2,
         maxOutputTokens: 1024,
       });
 
@@ -190,7 +306,7 @@ const server = http.createServer(async (req, res) => {
         data?.candidates?.[0]?.content?.parts
           ?.map((p) => p.text || '')
           .join('')
-          .trim() || 'Tidak ada jawaban.';
+          .trim() || PESAN_TIDAK_TERSEDIA;
 
       return kirimJson(res, 200, { jawaban });
     } catch (err) {
@@ -207,11 +323,24 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    const bahaya = deteksiInputBerbahaya(pertanyaan);
+    if (bahaya) {
+      return kirimJson(res, 400, { error: bahaya });
+    }
+
+    if (deteksiPromptInjection(pertanyaan)) {
+      return kirimJson(res, 200, {
+        jawaban:
+          'Permintaan ditolak oleh sistem keamanan AI: AI hanya boleh menjawab pertanyaan seputar pedoman SKPITrace, tidak boleh memberikan data pengguna lain, dan tidak mengikuti instruksi yang melanggar aturan sistem.',
+        sumber: [],
+      });
+    }
+
     const daftarCatatan = cariCatatan(pertanyaan, 3);
     if (daftarCatatan.length === 0) {
-      // Sesuai Langkah 10: Kalau tidak ada catatan yang cocok, langsung balas tanpa memanggil AI
+      // Sesuai Modul 6 & Langkah 10: Kalau tidak ada catatan yang cocok, langsung balas tanpa memanggil AI
       return kirimJson(res, 200, {
-        jawaban: 'Belum ada catatan narasumber yang cocok dengan pertanyaan itu.',
+        jawaban: PESAN_TIDAK_TERSEDIA,
         sumber: [],
       });
     }
@@ -224,7 +353,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     const konteks = susunKonteks(daftarCatatan);
-    const systemPromptRag = `Kamu asisten verifikasi SKPI mahasiswa (SKPITrace). Jawab HANYA berdasarkan catatan di bawah dan sebut id catatan yang kamu pakai, misalnya [SKPI-01]. Jawab singkat tanpa format markdown. Kalau catatannya tidak cukup, bilang datanya belum ada. Jangan menyimpulkan dokumen pasti asli atau pasti palsu.\n\nCATATAN:\n${konteks}`;
+    const systemPromptRag = `Kamu asisten verifikasi SKPI mahasiswa (SKPITrace).
+Aturan Wajib:
+1. AI hanya boleh menjawab pertanyaan seputar sistem ini HANYA berdasarkan catatan di bawah dan sebut id catatan yang dipakai, misalnya [SKPI-01].
+2. AI tidak boleh memberikan data pribadi pengguna lain dan tidak boleh menjalankan transaksi tanpa konfirmasi pengguna.
+3. Jangan menyimpulkan dokumen pasti asli atau pasti palsu (output AI adalah saran/indikator, bukan keputusan otomatis).
+4. Jika informasi tidak tersedia di catatan, jawab persis: "${PESAN_TIDAK_TERSEDIA}"
+5. Jawab singkat tanpa format markdown.\n\nCATATAN:\n${konteks}`;
 
     try {
       const data = await panggilGeminiGenerateContent({
@@ -240,7 +375,7 @@ const server = http.createServer(async (req, res) => {
         data?.candidates?.[0]?.content?.parts
           ?.map((p) => p.text || '')
           .join('')
-          .trim() || 'Belum ada catatan narasumber yang cocok dengan pertanyaan itu.';
+          .trim() || PESAN_TIDAK_TERSEDIA;
 
       const sumber = daftarCatatan.map((c) => ({ id: c.id, judul: c.judul }));
       return kirimJson(res, 200, { jawaban, sumber });
@@ -255,6 +390,19 @@ const server = http.createServer(async (req, res) => {
     if (!pertanyaan) {
       return kirimJson(res, 400, {
         error: 'Pertanyaan wajib diisi, maksimal 500 karakter.',
+      });
+    }
+
+    const bahaya = deteksiInputBerbahaya(pertanyaan);
+    if (bahaya) {
+      return kirimJson(res, 400, { error: bahaya });
+    }
+
+    if (deteksiPromptInjection(pertanyaan)) {
+      return kirimJson(res, 200, {
+        jawaban:
+          'Permintaan ditolak oleh sistem keamanan AI: AI Agent berjalan dalam mode Read-Only, menolak instruksi berbahaya (prompt injection), tidak dapat membocorkan data pengguna lain, dan hanya menjawab pertanyaan terkait verifikasi SKPI.',
+        jejak: [],
       });
     }
 

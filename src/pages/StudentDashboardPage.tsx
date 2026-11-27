@@ -108,6 +108,23 @@ export const StudentDashboardPage: React.FC = () => {
 
   const handleSubmitCertificate = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanCertNo = certNumber.trim();
+    const cleanActName = activityName.trim();
+    if (!cleanCertNo || !cleanActName) {
+      setToastMessage('Validasi Form: Nomor Surat Sertifikat dan Nama Kegiatan wajib diisi.');
+      return;
+    }
+    if (
+      /<script\b|javascript:|onerror=|onload=|private\s*key|seed\s*phrase/i.test(
+        `${cleanCertNo} ${cleanActName}`
+      )
+    ) {
+      setToastMessage(
+        'Validasi Keamanan: Input ditolak karena mengandung skrip berbahaya atau kata kunci rahasia (private key/seed phrase).'
+      );
+      return;
+    }
+
     let currentScreen = screeningResult;
     if (!currentScreen) {
       currentScreen = await runAiPreScreening({

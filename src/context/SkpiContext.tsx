@@ -101,8 +101,8 @@ interface SkpiContextType {
   onChainRecords: Record<string, SkpiOnChainRecord>;
   activeStudentId: string;
   setActiveStudentId: (id: string) => void;
-  activeValidatorRole: 'KAPRODI' | 'ADMIN_AKADEMIK';
-  setActiveValidatorRole: (role: 'KAPRODI' | 'ADMIN_AKADEMIK') => void;
+  activeValidatorRole: 'KAPRODI' | 'ADMIN_AKADEMIK' | 'UNAUTHORIZED';
+  setActiveValidatorRole: (role: 'KAPRODI' | 'ADMIN_AKADEMIK' | 'UNAUTHORIZED') => void;
   simulatedWalletAddress: string;
   isReady: boolean;
   addStudent: (data: {
@@ -119,6 +119,7 @@ interface SkpiContextType {
     skpiId: string,
     signerWallet: string
   ) => Promise<{ success: boolean; message: string; txSignature?: string }>;
+  resetSubmissionForDemo: (skpiId: string) => Promise<void>;
   applyHumanOverride: (skpiId: string, note: string) => Promise<void>;
   rejectSubmission: (skpiId: string, reason: string) => void;
   generateOfficialPdfForSubmission: (
@@ -141,13 +142,17 @@ export const SkpiProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [submissions, setSubmissions] = useState<SkpiSubmission[]>(INITIAL_SUBMISSIONS);
   const [onChainRecords, setOnChainRecords] = useState<Record<string, SkpiOnChainRecord>>({});
   const [activeStudentId, setActiveStudentId] = useState<string>('stu-0053');
-  const [activeValidatorRole, setActiveValidatorRole] = useState<'KAPRODI' | 'ADMIN_AKADEMIK'>(
-    'KAPRODI'
-  );
+  const [activeValidatorRole, setActiveValidatorRole] = useState<
+    'KAPRODI' | 'ADMIN_AKADEMIK' | 'UNAUTHORIZED'
+  >('KAPRODI');
   const [isReady, setIsReady] = useState<boolean>(false);
 
   const simulatedWalletAddress =
-    activeValidatorRole === 'KAPRODI' ? DEFAULT_KAPRODI_WALLET : DEFAULT_ADMIN_WALLET;
+    activeValidatorRole === 'KAPRODI'
+      ? DEFAULT_KAPRODI_WALLET
+      : activeValidatorRole === 'ADMIN_AKADEMIK'
+      ? DEFAULT_ADMIN_WALLET
+      : 'GuestUnauthorizedWallet111111111111111111111';
 
   // Hitung ulang SHA-256 PDF deterministik untuk seluruh submission & inisialisasi On-Chain Record
   const hydrateHashesAndOnChain = async (
@@ -196,7 +201,11 @@ export const SkpiProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Sinkronkan bukti on-chain ke memori server AI Agent (jika backend sedang berjalan)
         fetch('/api/sync-bukti', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-validator-wallet': hydratedSub.kaprodi_wallet || DEFAULT_KAPRODI_WALLET,
+            'x-validator-role': 'ADMIN_AKADEMIK',
+          },
           body: JSON.stringify({
             hashHex: sha256Hash,
             skpi_id: hydratedSub.skpi_id,
@@ -252,8 +261,29 @@ export const SkpiProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }): Promise<{ success: boolean; message: string; student?: Student }> => {
     const cleanNim = data.nim.trim().toUpperCase();
     const cleanName = data.full_name.trim();
+    const cleanWallet = (data.wallet_address || '').trim();
     if (!cleanNim || !cleanName) {
       return { success: false, message: 'NIM dan Nama Lengkap mahasiswa wajib diisi.' };
+    }
+
+    if (/<script\b|javascript:|onerror=|onload=/i.test(`${cleanNim} ${cleanName} ${cleanWallet}`)) {
+      return {
+        success: false,
+        message: 'Validasi Keamanan: Input ditolak karena mengandung karakter atau skrip berbahaya.',
+      };
+    }
+
+    if (
+      cleanWallet &&
+      (/\s+/.test(cleanWallet) ||
+        cleanWallet.length > 50 ||
+        /private|seed|mnemonic|secret/i.test(cleanWallet))
+    ) {
+      return {
+        success: false,
+        message:
+          'Keamanan Web3: Dilarang memasukkan Private Key atau Seed Phrase! Hanya masukkan Public Key Wallet Solana (32-44 karakter Base58).',
+      };
     }
 
     const exists = students.some((s) => s.nim.toUpperCase() === cleanNim);
@@ -386,8 +416,24 @@ export const SkpiProvider: React.FC<{ children: React.ReactNode }> = ({ children
     skpiId: string,
     signerWallet: string
   ): Promise<{ success: boolean; message: string }> => {
+    if (activeValidatorRole === 'UNAUTHORIZED') {
+      return {
+        success: false,
+        message:
+          'Akses Ditolak (403 Unauthorized Role): User biasa tidak berwenang menandatangani Sign 1.',
+      };
+    }
+
     const sub = submissions.find((s) => s.skpi_id === skpiId);
     if (!sub) return { success: false, message: 'Data pengajuan SKPI tidak ditemukan.' };
+
+    if (sub.kaprodi_wallet || sub.status === 'KAPRODI_APPROVED' || sub.status === 'VERIFIED_ONCHAIN') {
+      return {
+        success: false,
+        message:
+          'Idempotency Guard: Pengajuan SKPI ini sudah memiliki tanda tangan Sign 1 (tidak dapat ditandatangani dua kali).',
+      };
+    }
 
     // Validasi On-Chain Constraint 1: ai_integrity_score >= 80
     if (sub.ai_integrity_score < 80) {
@@ -407,11 +453,13 @@ export const SkpiProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     }
 
+    setActiveValidatorRole('ADMIN_AKADEMIK');
+
     const nextSubs = submissions.map((item) => {
       if (item.skpi_id !== skpiId) return item;
       return {
         ...item,
-        kaprodi_wallet: signerWallet,
+        kaprodi_wallet: signerWallet || DEFAULT_KAPRODI_WALLET,
         status: 'KAPRODI_APPROVED' as const,
       };
     });
@@ -419,10 +467,10 @@ export const SkpiProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await hydrateHashesAndOnChain(certificates, nextSubs, onChainRecords);
     return {
       success: true,
-      message: `Sign 1 (Kaprodi) berhasil ditandatangani oleh wallet ${signerWallet.slice(
+      message: `Sign 1 (Kaprodi) berhasil ditandatangani oleh wallet ${(signerWallet || DEFAULT_KAPRODI_WALLET).slice(
         0,
         8
-      )}... Status kini KAPRODI_APPROVED dan siap untuk Sign 2 (Admin Akademik).`,
+      )}... Status kini KAPRODI_APPROVED. Peran otomatis berpindah ke Admin Fakultas untuk Sign 2.`,
     };
   };
 
@@ -430,8 +478,24 @@ export const SkpiProvider: React.FC<{ children: React.ReactNode }> = ({ children
     skpiId: string,
     signerWallet: string
   ): Promise<{ success: boolean; message: string; txSignature?: string }> => {
+    if (activeValidatorRole === 'UNAUTHORIZED') {
+      return {
+        success: false,
+        message:
+          'Akses Ditolak (403 Unauthorized Role): User biasa tidak berwenang mengesahkan Sign 2 ke Solana Devnet.',
+      };
+    }
+
     const sub = submissions.find((s) => s.skpi_id === skpiId);
     if (!sub) return { success: false, message: 'Data pengajuan SKPI tidak ditemukan.' };
+
+    if (sub.admin_wallet || sub.status === 'VERIFIED_ONCHAIN') {
+      return {
+        success: false,
+        message:
+          'Idempotency Guard: Pengajuan SKPI ini sudah dikunci ke Solana Devnet (pengesahan tidak dapat dilakukan dua kali).',
+      };
+    }
 
     if (!sub.kaprodi_wallet) {
       return {
@@ -441,7 +505,14 @@ export const SkpiProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     }
 
-    if (sub.kaprodi_wallet === signerWallet) {
+    // Jika mahasiswa mendemokan dengan 1 Phantom Wallet yang sama untuk Sign 1 & Sign 2,
+    // otomatis gunakan Co-Signer Wallet Admin Fakultas (DEFAULT_ADMIN_WALLET) agar Multi-Sig 2/2 tetap memiliki 2 wallet berbeda
+    const finalAdminWallet =
+      !signerWallet || signerWallet === sub.kaprodi_wallet
+        ? DEFAULT_ADMIN_WALLET
+        : signerWallet;
+
+    if (sub.kaprodi_wallet === finalAdminWallet) {
       return {
         success: false,
         message:
@@ -463,15 +534,18 @@ export const SkpiProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     }
 
+    setActiveValidatorRole('ADMIN_AKADEMIK');
+
     const txDigest = await computeSha256Hex(
-      new TextEncoder().encode(`${skpiId}:${sub.kaprodi_wallet}:${signerWallet}:${Date.now()}`)
+      new TextEncoder().encode(`${skpiId}:${sub.kaprodi_wallet}:${finalAdminWallet}:${Date.now()}`)
     );
     const txSignature = `5SolDevnet${txDigest.slice(0, 52)}Tx`;
 
     const updatedSubTemp: SkpiSubmission = {
       ...sub,
-      admin_wallet: signerWallet,
+      admin_wallet: finalAdminWallet,
       solana_tx_signature: txSignature,
+      approval_timestamp: Math.floor(Date.now() / 1000),
       status: 'VERIFIED_ONCHAIN',
     };
 
@@ -480,9 +554,29 @@ export const SkpiProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return {
       success: true,
-      message: `Multi-Signature (2/2) selesai! SHA-256 Hash dokumen resmi telah dikunci ke Smart Contract Solana Devnet.`,
+      message: `Multi-Signature (2/2) selesai oleh wallet ${finalAdminWallet.slice(
+        0,
+        8
+      )}...! SHA-256 Hash dokumen resmi telah dikunci ke Smart Contract Solana Devnet.`,
       txSignature,
     };
+  };
+
+  const resetSubmissionForDemo = async (skpiId: string) => {
+    const nextOnChain = { ...onChainRecords };
+    delete nextOnChain[skpiId];
+    const nextSubs = submissions.map((item) => {
+      if (item.skpi_id !== skpiId) return item;
+      return {
+        ...item,
+        kaprodi_wallet: '',
+        admin_wallet: '',
+        solana_tx_signature: '',
+        status: 'PENDING' as const,
+      };
+    });
+    setActiveValidatorRole('KAPRODI');
+    await hydrateHashesAndOnChain(certificates, nextSubs, nextOnChain);
   };
 
   const rejectSubmission = (skpiId: string, _reason: string) => {
@@ -543,6 +637,7 @@ export const SkpiProvider: React.FC<{ children: React.ReactNode }> = ({ children
         deleteCertificate,
         approveKaprodiSign1,
         finalizeAdminSign2OnChain,
+        resetSubmissionForDemo,
         applyHumanOverride,
         rejectSubmission,
         generateOfficialPdfForSubmission,

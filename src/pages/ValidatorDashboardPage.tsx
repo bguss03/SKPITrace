@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import {
   FileCheck2,
   ShieldCheck,
@@ -12,6 +13,7 @@ import {
   UserCheck,
   Wallet,
   CheckSquare,
+  Lock,
 } from 'lucide-react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
@@ -34,12 +36,15 @@ export const ValidatorDashboardPage: React.FC = () => {
     simulatedWalletAddress,
     approveKaprodiSign1,
     finalizeAdminSign2OnChain,
+    resetSubmissionForDemo,
     applyHumanOverride,
     rejectSubmission,
     generateOfficialPdfForSubmission,
   } = useSkpi();
 
   const { publicKey, connected } = useWallet();
+  const { skpiId: routeSkpiId } = useParams<{ skpiId?: string }>();
+  const [searchParams] = useSearchParams();
 
   const [selectedSkpiId, setSelectedSkpiId] = useState<string>('SKPI-FTIK-2026-0053');
   const [overrideNote, setOverrideNote] = useState<string>(
@@ -53,15 +58,33 @@ export const ValidatorDashboardPage: React.FC = () => {
   const [showContractCode, setShowContractCode] = useState(false);
 
   const effectiveSignerWallet =
-    connected && publicKey ? publicKey.toBase58() : simulatedWalletAddress;
+    connected && publicKey
+      ? activeValidatorRole === 'ADMIN_AKADEMIK' &&
+        submissions.find((s) => s.skpi_id === selectedSkpiId)?.kaprodi_wallet ===
+          publicKey.toBase58()
+        ? DEFAULT_ADMIN_WALLET
+        : publicKey.toBase58()
+      : simulatedWalletAddress;
 
+  const requestedIdFromUrl = routeSkpiId || searchParams.get('id');
+  const isInvalidUrlId =
+    Boolean(requestedIdFromUrl) && !submissions.some((s) => s.skpi_id === requestedIdFromUrl);
+  const isUnauthorizedRole =
+    activeValidatorRole === 'UNAUTHORIZED' || searchParams.get('role') === 'guest';
+
+  const targetSkpiId = requestedIdFromUrl || selectedSkpiId;
   const activeSub =
-    submissions.find((s) => s.skpi_id === selectedSkpiId) || submissions[0];
-  const activeStudent = students.find((s) => s.id === activeSub.student_id)!;
-  const activeCerts = certificates.filter((c) => c.student_id === activeStudent.id);
-  const activeOnChain = onChainRecords[activeSub.skpi_id];
+    submissions.find((s) => s.skpi_id === targetSkpiId) || submissions[0] || null;
+  const activeStudent = activeSub
+    ? students.find((s) => s.id === activeSub.student_id) || null
+    : null;
+  const activeCerts = activeStudent
+    ? certificates.filter((c) => c.student_id === activeStudent.id)
+    : [];
+  const activeOnChain = activeSub ? onChainRecords[activeSub.skpi_id] : undefined;
 
   const handleSign1Kaprodi = async () => {
+    if (!activeSub) return;
     setIsSigning(true);
     setActionFeedback(null);
     try {
@@ -76,6 +99,7 @@ export const ValidatorDashboardPage: React.FC = () => {
   };
 
   const handleSign2Admin = async () => {
+    if (!activeSub) return;
     setIsSigning(true);
     setActionFeedback(null);
     try {
@@ -90,6 +114,7 @@ export const ValidatorDashboardPage: React.FC = () => {
   };
 
   const handleOverrideLowScore = async () => {
+    if (!activeSub) return;
     await applyHumanOverride(activeSub.skpi_id, overrideNote);
     setActionFeedback({
       type: 'success',
@@ -98,6 +123,7 @@ export const ValidatorDashboardPage: React.FC = () => {
   };
 
   const handleDownloadPreviewPdf = async () => {
+    if (!activeSub) return;
     const { pdfBytes, filename } = await generateOfficialPdfForSubmission(
       activeSub.skpi_id,
       false
@@ -152,6 +178,19 @@ export const ValidatorDashboardPage: React.FC = () => {
             >
               Peran: Admin Fakultas (Sign 2)
             </button>
+            <button
+              onClick={() => {
+                setActiveValidatorRole('UNAUTHORIZED');
+                setActionFeedback(null);
+              }}
+              className={`rounded-lg px-3 py-1.5 text-xs font-extrabold transition ${
+                activeValidatorRole === 'UNAUTHORIZED'
+                  ? 'bg-orange-900 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-orange-900'
+              }`}
+            >
+              Uji Akses: User Biasa (Non-Admin)
+            </button>
           </div>
 
           <div className="solana-wallet-btn-wrapper">
@@ -186,7 +225,7 @@ export const ValidatorDashboardPage: React.FC = () => {
       </div>
 
       {/* Inspector Kode Smart Contract Rust / Anchor */}
-      {showContractCode && (
+      {showContractCode && activeSub && (
         <div className="mb-6 rounded-2xl border-2 border-orange-300 bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <div>
@@ -232,7 +271,82 @@ pub struct SkpiRecord {
         </div>
       )}
 
-      {/* Main Grid: Tabel Antrean Pengajuan SKPI & Panel Detail Pemeriksaan + Multi-Sig */}
+      {/* Proteksi Keamanan 1: Mengakses halaman admin tanpa role admin -> Ditolak */}
+      {isUnauthorizedRole ? (
+        <div className="rounded-2xl border-2 border-orange-800 bg-orange-50/50 p-8 text-center shadow-sm">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-900 text-white shadow-sm">
+            <Lock className="h-7 w-7" />
+          </div>
+          <span className="inline-flex items-center rounded-full bg-orange-900 px-3 py-0.5 font-mono text-xs font-extrabold text-white">
+            403 FORBIDDEN — UNAUTHORIZED ROLE
+          </span>
+          <h2 className="mt-3 text-xl font-extrabold text-slate-900">
+            Akses Ditolak: Anda Tidak Memiliki Role Validator Akademik
+          </h2>
+          <p className="mx-auto mt-2 max-w-xl text-xs sm:text-sm text-slate-700 leading-relaxed">
+            Halaman ini dilindungi kontrol akses berbasis peran (<em>Role-Based Access Control</em>).
+            User biasa atau wallet yang tidak terdaftar di dalam registri{' '}
+            <code className="rounded border border-orange-300 bg-white px-1.5 py-0.5 font-mono text-orange-900">
+              PENCATAT_RESMI
+            </code>{' '}
+            ditolak untuk mengakses antrean pengesahan SKPI maupun mengirim transaksi Multi-Signature.
+          </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => setActiveValidatorRole('KAPRODI')}
+              className="rounded-xl bg-orange-600 px-4 py-2 text-xs font-extrabold text-white hover:bg-orange-700 transition"
+            >
+              Beralih ke Role Kaprodi (Terotorisasi)
+            </button>
+            <Link
+              to="/"
+              className="rounded-xl border border-orange-300 bg-white px-4 py-2 text-xs font-extrabold text-orange-800 hover:bg-orange-50 transition"
+            >
+              Kembali ke Portal Publik
+            </Link>
+          </div>
+        </div>
+      ) : isInvalidUrlId ? (
+        /* Proteksi Keamanan 2: Mengubah ID di URL -> Akses ditolak */
+        <div className="rounded-2xl border-2 border-orange-800 bg-orange-50/50 p-8 text-center shadow-sm">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-900 text-white shadow-sm">
+            <ShieldAlert className="h-7 w-7" />
+          </div>
+          <span className="inline-flex items-center rounded-full bg-orange-900 px-3 py-0.5 font-mono text-xs font-extrabold text-white">
+            403 / 404 — ID DOKUMEN TIDAK VALID
+          </span>
+          <h2 className="mt-3 text-xl font-extrabold text-slate-900">
+            Akses Ditolak: ID Dokumen SKPI &ldquo;{requestedIdFromUrl}&rdquo; Tidak Terdaftar
+          </h2>
+          <p className="mx-auto mt-2 max-w-xl text-xs sm:text-sm text-slate-700 leading-relaxed">
+            Parameter ID dokumen di URL telah diubah atau tidak ditemukan dalam registri pengajuan
+            program studi Anda. Sistem menolak akses untuk mencegah manipulasi referensi objek langsung
+            (<em>IDOR Prevention</em>).
+          </p>
+          <div className="mt-5 flex justify-center">
+            <Link
+              to="/validator/dashboard"
+              className="rounded-xl bg-orange-600 px-4 py-2 text-xs font-extrabold text-white hover:bg-orange-700 transition"
+            >
+              Kembali ke Antrean Validator Resmi
+            </Link>
+          </div>
+        </div>
+      ) : !activeSub || !activeStudent || submissions.length === 0 ? (
+        /* Empty State: Saat data pengajuan belum tersedia */
+        <div className="rounded-2xl border-2 border-dashed border-orange-200 bg-white p-10 text-center shadow-sm">
+          <FileCheck2 className="mx-auto mb-3 h-10 w-10 text-orange-400" />
+          <h2 className="text-base font-extrabold text-slate-900">
+            Belum Ada Data Pengajuan SKPI di Antrean
+          </h2>
+          <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
+            Saat ini belum ada berkas portofolio mahasiswa yang diajukan untuk diverifikasi. Silakan
+            tambahkan data mahasiswa atau sertifikat melalui menu Portofolio Mahasiswa.
+          </p>
+        </div>
+      ) : (
+      /* Main Grid: Tabel Antrean Pengajuan SKPI & Panel Detail Pemeriksaan + Multi-Sig */
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Tabel Antrean Verifikasi */}
         <div className="lg:col-span-5 rounded-2xl border-2 border-orange-100 bg-white p-5 shadow-sm">
@@ -436,10 +550,27 @@ pub struct SkpiRecord {
 
           {/* Tahapan Multi-Signature On-Chain Recording (Sign 1 Kaprodi & Sign 2 Admin) */}
           <div className="mt-5 rounded-xl border-2 border-orange-100 bg-white p-4">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800 mb-3 flex items-center gap-1.5">
-              <KeyRound className="h-4 w-4 text-orange-600" />
-              <span>Konsensus Akademik Multi-Signature (Solana Devnet)</span>
-            </h3>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                <KeyRound className="h-4 w-4 text-orange-600" />
+                <span>Konsensus Akademik Multi-Signature (Solana Devnet)</span>
+              </h3>
+              {(activeSub.kaprodi_wallet || activeSub.status === 'VERIFIED_ONCHAIN') && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await resetSubmissionForDemo(activeSub.skpi_id);
+                    setActionFeedback({
+                      type: 'success',
+                      text: `Status ${activeSub.skpi_id} di-reset ke PENDING. Silakan klik Sign 1 (Kaprodi) lalu Sign 2 (Admin) untuk mendemokan alur Multi-Signature!`,
+                    });
+                  }}
+                  className="rounded-lg border border-orange-300 bg-orange-50 px-2.5 py-1 text-[11px] font-extrabold text-orange-800 hover:bg-orange-100 transition"
+                >
+                  Uji Ulang Multi-Sig (Reset ke PENDING)
+                </button>
+              )}
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
               {/* Box Sign 1 Kaprodi */}
@@ -576,6 +707,7 @@ pub struct SkpiRecord {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 };
